@@ -15,6 +15,7 @@ Altitude is in meters, pressure is in millibars (hectopascals), and temperature 
 By default, this program looks in a text file named `api.apikey`, reads the first line, and uses that as the `token` parameter passed to Synoptic Data. Alternate locations for this file can be specified using a command line switch. You can get your own token by [signing up for Synoptic Data API access for free](https://developers.synopticdata.com/signup/). No, you can't have mine. 
 
 # What do the command line switches do?
+- `-f` reads data from a JSON file instead of fetching it from Synoptic Data. Data fetched from Synoptic Data is stored in `last_result.json`, and using `-f` without any arguments will read from this file. 
 - `-s` sets the 'sounding' display viewport size, and takes two arguments (`-s 67 18`). 
 - Product selection (for the Y-axis) can accept :
   - `pres` (pressure measured by the weather station), 
