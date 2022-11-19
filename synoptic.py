@@ -5,7 +5,7 @@ import json
 
 import requests
 
-VERSION = 0x0100
+VERSION = 0x0101
 
 
 def clamp(test, lower, upper):
@@ -52,6 +52,7 @@ class Synoptics(object):
         self.lr = []
 
     def from_latest(self, radius=None, wvars=None, need_all_vars=False,
+                    enable_wind=False,
                     get_all_stations=False, within=15):
         """Fetch current data from Synoptic Data"""
         if not radius:
@@ -61,6 +62,8 @@ class Synoptics(object):
         assert len(radius) == 3, "Incorrect radius parameter."
         if not wvars or need_all_vars:
             wvars = ("air_temp","dew_point_temperature","pressure")
+        if enable_wind:
+            wvars += ("wind_speed", "wind_gust")
         params = {"vars": ','.join(wvars),
                   "varsoperator":("or" if need_all_vars else "and"),
                   "token": self.token,
@@ -94,6 +97,7 @@ class Synoptics(object):
     def prune(self, by):
         """Prune by presence of an attribute in a Station"""
         i = 0
+        print(by)
         while True:
             if getattr(self.lr[i], by, None) == None: del self.lr[i]
             else: i += 1
@@ -113,15 +117,13 @@ class Synoptics(object):
 
     def report_temp_vs_pres(self, xl=50, yl=21, min_temp=None, min_pres=None,
                             max_pres=None, max_temp=None, key="pres",
-                            show_console=True, out_json=None, use_dp=False):
+                            show_console=True, out_json=None, xkey="temp"):
         """Create and process the temperature vs. pressure report"""
         if min_temp == None: min_temp = -1000
         if max_temp == None: max_temp = 1000
         if min_pres == None: min_pres = 0
         if max_pres == None: max_pres = 10000
         jd = dict()
-        if use_dp: xkey = "dewp"
-        else: xkey = "temp"
         assert key in ("pres_uc", "pres",
                        "elevation", "elevation_dem"), "Invalid y-axis"
         self.prune(key)
@@ -136,7 +138,7 @@ class Synoptics(object):
             minmax[1] = clamp(minmax[1], min_pres, minmax[0]-10) # it works
         if max_pres and "pres" in key:
             minmax[0] = clamp(minmax[0], minmax[1]+10, max_pres)
-        tminmax = self._tmp_range()
+        tminmax = self._tmp_range(key=xkey)
         tminmax = [clamp(tminmax[0], min_temp, tminmax[1]-10),
                    clamp(tminmax[1], tminmax[0]+10, max_temp)]
         jd["x-min"] = tminmax[0]
@@ -238,6 +240,24 @@ class Station(object):
             if self.verbose:
                 print("Didn't find Pressure for", self.sid)
                 print("Keys:", list(data["SENSOR_VARIABLES"].keys()))
+        try:
+            ws_key = list(data["SENSOR_VARIABLES"]\
+                          ["wind_speed"].keys())[0]
+            self.wind = data["OBSERVATIONS"][ws_key]["value"]
+        except:
+            self.wind = None
+            if self.verbose:
+                print("Didn't find Wind Speed for", self.sid)
+                print("Keys:", list(data["SENSOR_VARIABLES"].keys()))
+        try:
+            wg_key = list(data["SENSOR_VARIABLES"]\
+                          ["wind_gust"].keys())[0]
+            self.gust = data["OBSERVATIONS"][wg_key]["value"]
+        except:
+            self.gust = None
+            if self.verbose:
+                print("Didn't find Wind Gust for", self.sid)
+                print("Keys:", list(data["SENSOR_VARIABLES"].keys()))
 
 
 if __name__ == "__main__":
@@ -268,15 +288,16 @@ stations. This info is passed directly to Synoptic.")
                    const="last_result.json", nargs='?',
                    help="Select a JSON file containing stored results. \
 If no filename is specified, the Last Result file is used.")
-    a.add_argument("-d", "--dewpoint", action="count", default=0,
-                   help="Use dewpoint instead of air temperature.")
+    a.add_argument("-x", "--xkey", action="store", default="temp",
+                   choices=["temp", "dewp", "wind", "gust"],
+                   help="Select what mesonet value is being plotted.")
     a.add_argument("--pres-lower", type=int, default=850,
                    help="Minimum pressure (mbar) of the 'sounding' display. \
 Default is 850.")
     a.add_argument("--pres-upper", type=int, default=1025,
                    help="Maximum pressure (mbar) of the 'sounding' display. \
 Default is 1025.")
-    a.add_argument("--temp-lower", type=int, default=0,
+    a.add_argument("--temp-lower", type=int, default=None,
                    help="Minimum temperature (C) of the 'sounding' display. \
 Default is 0.")
     a.add_argument("--temp-upper", type=int, default=None,
@@ -290,6 +311,8 @@ Default is 0.")
     a.add_argument("--all-params", action="count", default=0,
                    help="Require all parameters used by %(prog)s in the \
 Synoptic data fetch. Use with --slim.")
+    a.add_argument("--enable-wind", action="count", default=0,
+                   help="Enable the use of wind parameters. Limits stations.")
     a.add_argument("-l", "--localize", type=str, default="%.:#",
                    help="Define the character set used for the display.")
     a.add_argument("-t", "--token", type=str, default=None,
@@ -308,7 +331,9 @@ Synoptic data fetch. Use with --slim.")
     if args.file == "__LIVE__":
         print("Data source: live data from Synoptics API")
         need_products = []
-        if args.dewpoint: need_products.append("dew_point_temperature")
+        if args.xkey == "dewp": need_products.append("dew_point_temperature")
+        elif args.xkey == "wind": need_products.append("wind_speed")
+        elif args.xkey == "gust": need_products.append("wind_gust")
         else: need_products.append("air_temp")
         if args.product in ("pres",):
             need_products.append("pres")
@@ -319,6 +344,7 @@ Synoptic data fetch. Use with --slim.")
         m.from_latest(radius=radius,
                       need_all_vars=bool(args.all_params),
                       get_all_stations=not bool(args.slim),
+                      enable_wind=bool(args.enable_wind),
                       wvars=need_products, within=args.within)
     else:
         print("Data source: saved data from file ({})".format(args.file))
@@ -331,4 +357,4 @@ Synoptic data fetch. Use with --slim.")
                           key=args.product,
                           out_json=args.output[0],
                           show_console=(args.no_viz == 0),
-                          use_dp=bool(args.dewpoint))
+                          xkey=args.xkey)
